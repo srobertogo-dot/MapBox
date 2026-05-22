@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Tracking en Tiempo Real</title>
+
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.0.1/mapbox-gl.js"></script>
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.0.1/mapbox-gl.css" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet"/>
+
+<style>
+  :root {
+    --verde: #00ff88;
+    --rojo: #ff4466;
+    --panel: #0d1520cc;
+    --borde: #1a2f44;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Rajdhani', sans-serif; color: #c8dce8; overflow: hidden; }
+  #map { position: absolute; inset: 0; }
+
+  #panel {
+    position: absolute; top: 16px; left: 16px; width: 240px;
+    background: var(--panel); border: 1px solid var(--borde);
+    border-radius: 12px; backdrop-filter: blur(12px);
+    padding: 16px; z-index: 10; display: flex; flex-direction: column; gap: 12px;
+  }
+  .panel-title {
+    font-family: 'Share Tech Mono', monospace; font-size: 11px;
+    color: var(--verde); letter-spacing: 3px; text-transform: uppercase;
+    border-bottom: 1px solid var(--borde); padding-bottom: 8px;
+  }
+  .dato { display: flex; flex-direction: column; gap: 2px; }
+  .dato label { font-size: 10px; color: #5a7a8a; letter-spacing: 2px; text-transform: uppercase; font-family: 'Share Tech Mono', monospace; }
+  .dato span { font-size: 17px; font-weight: 700; color: #e8f4ff; font-family: 'Share Tech Mono', monospace; }
+  .status { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--verde); box-shadow: 0 0 8px var(--verde); animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.8)} }
+
+  #panel-geocercas {
+    position: absolute; top: 16px; right: 16px; width: 240px;
+    background: var(--panel); border: 1px solid var(--borde);
+    border-radius: 12px; backdrop-filter: blur(12px);
+    padding: 16px; z-index: 10; max-height: 70vh;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  #lista-geocercas { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  #lista-geocercas::-webkit-scrollbar { width: 4px; }
+  #lista-geocercas::-webkit-scrollbar-thumb { background: var(--borde); border-radius: 4px; }
+
+  .btn-dibujar {
+    background: var(--verde); color: #000; border: none;
+    border-radius: 8px; padding: 10px; font-family: 'Rajdhani', sans-serif;
+    font-size: 14px; font-weight: 700; cursor: pointer; letter-spacing: 1px;
+    transition: opacity 0.2s; flex-shrink: 0;
+  }
+  .btn-dibujar:hover { opacity: 0.85; }
+  .btn-dibujar.activo { background: var(--rojo); color: #fff; }
+
+  .instruccion {
+    font-size: 11px; color: #5a7a8a;
+    font-family: 'Share Tech Mono', monospace; text-align: center; flex-shrink: 0;
+  }
+
+  .geocerca-item {
+    background: #0a1822; border: 1px solid var(--borde);
+    border-radius: 8px; padding: 10px;
+    display: flex; flex-direction: column; gap: 6px; flex-shrink: 0;
+  }
+  .geocerca-item-header { display: flex; justify-content: space-between; align-items: center; }
+  .geocerca-nombre { font-size: 13px; font-weight: 700; color: var(--verde); display: flex; align-items: center; gap: 6px; }
+  .btn-eliminar {
+    background: var(--rojo); color: #fff; border: none;
+    border-radius: 6px; padding: 3px 10px; font-size: 12px;
+    font-weight: 700; cursor: pointer; font-family: 'Rajdhani', sans-serif;
+    flex-shrink: 0;
+  }
+  .geocerca-coords { font-size: 10px; color: #5a7a8a; font-family: 'Share Tech Mono', monospace; line-height: 1.7; }
+  .gc-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--verde); display: inline-block; flex-shrink: 0; }
+  .gc-dot.activa { background: var(--rojo); box-shadow: 0 0 8px var(--rojo); animation: pulse 1s infinite; }
+  .empty-state { font-size: 12px; color: #3a5a6a; font-family: 'Share Tech Mono', monospace; text-align: center; padding: 12px 0; }
+
+  #alerta {
+    position: absolute; bottom: 30px; left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: var(--rojo); color: white;
+    padding: 12px 24px; border-radius: 8px;
+    font-weight: 700; font-size: 15px; letter-spacing: 1px;
+    z-index: 20; transition: transform 0.4s cubic-bezier(0.34,1.56,0.64,1);
+    box-shadow: 0 4px 20px rgba(255,68,102,.5); pointer-events: none;
+  }
+  #alerta.visible { transform: translateX(-50%) translateY(0); }
+
+  .marker-custom {
+    width: 32px; height: 32px; background: var(--verde); border-radius: 50%;
+    border: 3px solid white; animation: markerPulse 2s infinite;
+  }
+  @keyframes markerPulse {
+    0%,100%{box-shadow:0 0 0 4px rgba(0,255,136,.3),0 4px 12px rgba(0,0,0,.4)}
+    50%{box-shadow:0 0 0 12px rgba(0,255,136,.1),0 4px 12px rgba(0,0,0,.4)}
+  }
+
+  #canvas-dibujo { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+  #canvas-dibujo.activo { pointer-events: all; cursor: crosshair; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+<canvas id="canvas-dibujo"></canvas>
+
+<div id="panel">
+  <div class="panel-title">📡 Live Tracking</div>
+  <div class="status"><div class="dot"></div><span>CONECTADO</span></div>
+  <div class="dato"><label>Latitud</label><span id="lat">—</span></div>
+  <div class="dato"><label>Longitud</label><span id="lon">—</span></div>
+  <div class="dato"><label>Hora</label><span id="hora" style="font-size:14px">—</span></div>
+</div>
+
+<div id="panel-geocercas">
+  <div class="panel-title">⬛ Geocercas</div>
+  <button class="btn-dibujar" id="btnDibujar">+ Dibujar Geocerca</button>
+  <div class="instruccion" id="instruccion" style="display:none">Arrastra sobre el mapa para crear la zona</div>
+  <div id="lista-geocercas"><div class="empty-state">Sin geocercas</div></div>
+</div>
+
+<div id="alerta">⚠️ <span id="alerta-texto"></span></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getDatabase, ref, onValue, push, set, remove } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+mapboxgl.accessToken = "pk.eyJ1IjoiY2FybG9zeWxzIiwiYSI6ImNtbTltZ2l0cTA0bzkyb3BvY2hwMDR4a3QifQ.QPlslwayMdDE3SrzF5v74w";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCuOUhQysTgJbOhAwr5c2HwF6azTV8q5g4",
+  authDomain: "mapbox-35683.firebaseapp.com",
+  databaseURL: "https://mapbox-35683-default-rtdb.firebaseio.com",
+  projectId: "mapbox-35683",
+  storageBucket: "mapbox-35683.firebasestorage.app",
+  messagingSenderId: "954580315874",
+  appId: "1:954580315874:web:0339a2a98e6b96814c38bb"
+};
+
+const app = initializeApp(firebaseConfig);
+const db  = getDatabase(app);
+
+const map = new mapboxgl.Map({
+  container: 'map',
+  style: 'mapbox://styles/mapbox/dark-v11',
+  center: [-68.08, -16.53],
+  zoom: 14
+});
+
+const el = document.createElement("div");
+el.className = "marker-custom";
+const marker = new mapboxgl.Marker(el).setLngLat([-68.08, -16.53]).addTo(map);
+
+// ── Estado global ─────────────────────────────────────
+let geocercas        = {};   // { id: { id, minLat, maxLat, minLon, maxLon } }
+let dentroDeGeocercas = new Set();
+let posActual        = null;
+let geocercaLayers   = [];   // ids de capas en el mapa
+let modoDibujo       = false;
+let dibujando        = false;
+let startX, startY;
+
+// ── Canvas de dibujo ──────────────────────────────────
+const canvas = document.getElementById("canvas-dibujo");
+const ctx    = canvas.getContext("2d");
+
+function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+resizeCanvas();
+window.addEventListener("resize", resizeCanvas);
+
+const btnDibujar  = document.getElementById("btnDibujar");
+const instruccion = document.getElementById("instruccion");
+
+btnDibujar.addEventListener("click", () => {
+  modoDibujo = !modoDibujo;
+  if (modoDibujo) {
+    btnDibujar.textContent = "✕ Cancelar";
+    btnDibujar.classList.add("activo");
+    instruccion.style.display = "block";
+    canvas.classList.add("activo");
+    map.dragPan.disable();
+    map.scrollZoom.disable();
+  } else {
+    cancelarDibujo();
+  }
+});
+
+function cancelarDibujo() {
+  modoDibujo = false; dibujando = false;
+  btnDibujar.textContent = "+ Dibujar Geocerca";
+  btnDibujar.classList.remove("activo");
+  instruccion.style.display = "none";
+  canvas.classList.remove("activo");
+  map.dragPan.enable();
+  map.scrollZoom.enable();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function dibujarRect(x1, y1, x2, y2) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const x = Math.min(x1,x2), y = Math.min(y1,y2);
+  const w = Math.abs(x2-x1),  h = Math.abs(y2-y1);
+  ctx.fillStyle   = "rgba(0,255,136,0.15)";
+  ctx.strokeStyle = "#00ff88";
+  ctx.lineWidth   = 2;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeRect(x, y, w, h);
+}
+
+canvas.addEventListener("mousedown", e => { if (!modoDibujo) return; dibujando = true; startX = e.clientX; startY = e.clientY; });
+canvas.addEventListener("mousemove", e => { if (!dibujando) return; dibujarRect(startX, startY, e.clientX, e.clientY); });
+canvas.addEventListener("mouseup",   e => { if (!dibujando) return; dibujando = false; finalizarDibujo(startX, startY, e.clientX, e.clientY); });
+
+canvas.addEventListener("touchstart", e => { e.preventDefault(); dibujando = true; startX = e.touches[0].clientX; startY = e.touches[0].clientY; }, { passive: false });
+canvas.addEventListener("touchmove",  e => { e.preventDefault(); if (!dibujando) return; dibujarRect(startX, startY, e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
+canvas.addEventListener("touchend",   e => { e.preventDefault(); if (!dibujando) return; dibujando = false; finalizarDibujo(startX, startY, e.changedTouches[0].clientX, e.changedTouches[0].clientY); }, { passive: false });
+
+function finalizarDibujo(x1, y1, x2, y2) {
+  const rect = map.getCanvas().getBoundingClientRect();
+  const p1   = map.unproject([x1 - rect.left, y1 - rect.top]);
+  const p2   = map.unproject([x2 - rect.left, y2 - rect.top]);
+  const minLat = Math.min(p1.lat, p2.lat), maxLat = Math.max(p1.lat, p2.lat);
+  const minLon = Math.min(p1.lng, p2.lng), maxLon = Math.max(p1.lng, p2.lng);
+
+  if (maxLat - minLat < 0.0001 || maxLon - minLon < 0.0001) {
+    alert("Zona muy pequeña, intenta de nuevo.");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+  guardarGeocerca(minLat, maxLat, minLon, maxLon);
+  cancelarDibujo();
+}
+
+// ── Firebase: guardar y eliminar ──────────────────────
+function guardarGeocerca(minLat, maxLat, minLon, maxLon) {
+  const nueva = push(ref(db, "geocercas"));
+  set(nueva, { id: nueva.key, tipo: "rectangulo", minLat, maxLat, minLon, maxLon });
+}
+
+function eliminarGeocerca(id) {
+  if (!confirm("¿Eliminar esta geocerca?")) return;
+  // ✅ Solo elimina de Firebase — onValue actualizará la lista automáticamente
+  remove(ref(db, `geocercas/${id}`));
+}
+
+// ── Mapa: dibujar polígono ────────────────────────────
+function dibujarGeocercaMapa(g) {
+  const srcId  = `gc-src-${g.id}`;
+  const fillId = `gc-fill-${g.id}`;
+  const lineId = `gc-line-${g.id}`;
+
+  const coords = [
+    [g.minLon, g.minLat], [g.maxLon, g.minLat],
+    [g.maxLon, g.maxLat], [g.minLon, g.maxLat],
+    [g.minLon, g.minLat]
+  ];
+
+  map.addSource(srcId, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] } } });
+  map.addLayer({ id: fillId, type: 'fill', source: srcId, paint: { 'fill-color': '#00ff88', 'fill-opacity': 0.15 } });
+  map.addLayer({ id: lineId, type: 'line', source: srcId, paint: { 'line-color': '#00ff88', 'line-width': 2 } });
+
+  geocercaLayers.push(srcId, fillId, lineId);
+}
+
+function limpiarCapasMapa() {
+  geocercaLayers.forEach(id => {
+    if (map.getLayer(id))   map.removeLayer(id);
+    if (map.getSource(id))  map.removeSource(id);
+  });
+  geocercaLayers = [];
+}
+
+// ── Renderizar lista de geocercas ─────────────────────
+// ✅ Bug fix: se reconstruye SIEMPRE desde el snapshot de Firebase,
+//    nunca desde estado local que puede quedar desincronizado.
+function renderizarLista(snapshotGeocercas) {
+  const lista = document.getElementById("lista-geocercas");
+  lista.innerHTML = "";
+
+  if (Object.keys(snapshotGeocercas).length === 0) {
+    lista.innerHTML = '<div class="empty-state">Sin geocercas creadas</div>';
+    return;
+  }
+
+  let count = 0;
+  for (const id in snapshotGeocercas) {
+    const g = snapshotGeocercas[id];
+    count++;
+    const dentro = dentroDeGeocercas.has(id);
+
+    const item = document.createElement("div");
+    item.className = "geocerca-item";
+    item.id = `item-${id}`;
+    item.innerHTML = `
+      <div class="geocerca-item-header">
+        <span class="geocerca-nombre">
+          <span class="gc-dot ${dentro ? 'activa' : ''}" id="dot-${id}"></span>
+          Geocerca ${count}
+        </span>
+        <button class="btn-eliminar" data-id="${id}">🗑</button>
+      </div>
+      <div class="geocerca-coords">
+        NW: ${g.maxLat.toFixed(5)}, ${g.minLon.toFixed(5)}<br>
+        SE: ${g.minLat.toFixed(5)}, ${g.maxLon.toFixed(5)}
+      </div>`;
+    lista.appendChild(item);
+  }
+
+  // Asignar eventos eliminar después de renderizar
+  lista.querySelectorAll(".btn-eliminar").forEach(btn => {
+    btn.addEventListener("click", () => eliminarGeocerca(btn.dataset.id));
+  });
+}
+
+// ── Listeners Firebase ────────────────────────────────
+map.on("load", () => {
+
+  // Ubicación en tiempo real
+  onValue(ref(db, "ubicacion"), snap => {
+    const d = snap.val(); if (!d) return;
+    posActual = { lat: d.latitud, lon: d.longitud };
+    marker.setLngLat([d.longitud, d.latitud]);
+    map.setCenter([d.longitud, d.latitud]);
+    document.getElementById("lat").textContent  = d.latitud.toFixed(6);
+    document.getElementById("lon").textContent  = d.longitud.toFixed(6);
+    document.getElementById("hora").textContent = d.hora || new Date().toLocaleTimeString();
+    verificarGeocercas(d.latitud, d.longitud);
+  });
+
+  // Geocercas — se dispara cada vez que Firebase cambia (incluyendo eliminaciones)
+  onValue(ref(db, "geocercas"), snap => {
+    geocercas = {};
+    limpiarCapasMapa();
+
+    if (snap.exists()) {
+      snap.forEach(child => {
+        const g = child.val();
+        if (!g.minLat) return;
+        geocercas[g.id] = g;
+        dibujarGeocercaMapa(g);
+      });
+    }
+
+    // ✅ Siempre reconstruir la lista desde el estado más reciente
+    renderizarLista(geocercas);
+
+    if (posActual) verificarGeocercas(posActual.lat, posActual.lon);
+  });
+});
+
+// ── Verificar posición ────────────────────────────────
+function verificarGeocercas(lat, lon) {
+  for (const id in geocercas) {
+    const g = geocercas[id];
+    const dentroAhora   = lat >= g.minLat && lat <= g.maxLat && lon >= g.minLon && lon <= g.maxLon;
+    const estabaAdentro = dentroDeGeocercas.has(id);
+    const dot           = document.getElementById(`dot-${id}`);
+
+    if (dentroAhora && !estabaAdentro) {
+      dentroDeGeocercas.add(id);
+      if (dot) dot.classList.add("activa");
+      mostrarAlerta("¡Entraste a una geocerca!");
+    } else if (!dentroAhora && estabaAdentro) {
+      dentroDeGeocercas.delete(id);
+      if (dot) dot.classList.remove("activa");
+      mostrarAlerta("¡Saliste de una geocerca!");
+    }
+  }
+}
+
+let alertaTimeout;
+function mostrarAlerta(texto) {
+  const alerta = document.getElementById("alerta");
+  document.getElementById("alerta-texto").textContent = texto;
+  alerta.classList.add("visible");
+  clearTimeout(alertaTimeout);
+  alertaTimeout = setTimeout(() => alerta.classList.remove("visible"), 3000);
+}
+</script>
+</body>
+</html>
